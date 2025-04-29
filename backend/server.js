@@ -136,11 +136,12 @@ app.post('/api/process-excel', upload.single('file'), async (req, res) => {
           // Format records for Excel output
           const formattedRecords = {
             ...row, // Include all original row data
+
             'Domain_Checked': cleanDomain,
-            'A_Records': records.A.length > 0 ? records.A.join(', ') : 'No A records',
-            'AAAA_Records': records.AAAA.length > 0 ? records.AAAA.join(', ') : 'No AAAA records',
             'MX_Records': records.MX.length > 0 ? 
               records.MX.map(mx => `${mx.priority} ${mx.exchange}`).join(', ') : 'No MX records',
+            'A_Records': records.A.length > 0 ? records.A.join(', ') : 'No A records',
+            'AAAA_Records': records.AAAA.length > 0 ? records.AAAA.join(', ') : 'No AAAA records',
             'TXT_Records': records.TXT.length > 0 ? 
               records.TXT.map(txt => txt.join(' ')).join(' | ') : 'No TXT records',
             'NS_Records': records.NS.length > 0 ? records.NS.join(', ') : 'No NS records',
