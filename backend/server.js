@@ -116,34 +116,47 @@ app.post('/api/process-excel', upload.single('file'), async (req, res) => {
     const worksheet = workbook.Sheets[firstSheetName];
     const data = xlsx.utils.sheet_to_json(worksheet);
 
-    // Process each URL
+    // Process each row
     const results = [];
     for (const row of data) {
-      const urlKey = Object.keys(row).find(key => 
-        typeof row[key] === 'string' && 
-        (row[key].includes('http://') || row[key].includes('https://') || row[key].includes('.'))
+      // Find domain column (case insensitive)
+      const domainKey = Object.keys(row).find(key => 
+        key.toLowerCase() === 'domain' && row[key]
       );
 
-      if (urlKey && row[urlKey]) {
-        const url = row[urlKey].trim();
+      if (domainKey) {
+        const domain = row[domainKey].toString().trim();
         try {
-          const domain = url.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
-          const mxRecords = await lookupMXRecords(domain);
+          // Clean domain (remove http/https/www if present)
+          const cleanDomain = domain.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
           
-          const mxString = mxRecords.length > 0 
-            ? mxRecords.map(mx => `${mx.priority} ${mx.exchange}`).join(', ')
-            : 'No MX records found';
+          // Get all DNS records
+          const records = await lookupAllRecords(cleanDomain);
+          
+          // Format records for Excel output
+          const formattedRecords = {
+            ...row, // Include all original row data
+            'Domain_Checked': cleanDomain,
+            'A_Records': records.A.length > 0 ? records.A.join(', ') : 'No A records',
+            'AAAA_Records': records.AAAA.length > 0 ? records.AAAA.join(', ') : 'No AAAA records',
+            'MX_Records': records.MX.length > 0 ? 
+              records.MX.map(mx => `${mx.priority} ${mx.exchange}`).join(', ') : 'No MX records',
+            'TXT_Records': records.TXT.length > 0 ? 
+              records.TXT.map(txt => txt.join(' ')).join(' | ') : 'No TXT records',
+            'NS_Records': records.NS.length > 0 ? records.NS.join(', ') : 'No NS records',
+            'CNAME_Records': records.CNAME.length > 0 ? records.CNAME.join(', ') : 'No CNAME records',
+            'IP_Addresses': records.IPs.length > 0 ? 
+              records.IPs.map(ip => `${ip.address} (IPv${ip.family})`).join(', ') : 'No IP addresses',
+            'SOA_Record': records.SOA ? 
+              `Primary NS: ${records.SOA.nsname}, Hostmaster: ${records.SOA.hostmaster}` : 'No SOA record'
+          };
 
-          results.push({
-            URL: url,
-            Domain: domain,
-            MX_Records: mxString
-          });
+          results.push(formattedRecords);
         } catch (error) {
           results.push({
-            URL: url,
-            Domain: 'Error processing',
-            MX_Records: 'Error fetching MX records'
+            ...row,
+            'Domain_Checked': domain,
+            'Error': 'Failed to fetch DNS records'
           });
         }
       }
@@ -152,10 +165,10 @@ app.post('/api/process-excel', upload.single('file'), async (req, res) => {
     // Create output workbook
     const newWorkbook = xlsx.utils.book_new();
     const newWorksheet = xlsx.utils.json_to_sheet(results);
-    xlsx.utils.book_append_sheet(newWorkbook, newWorksheet, 'MX Results');
+    xlsx.utils.book_append_sheet(newWorkbook, newWorksheet, 'DNS Results');
 
     // Save output file
-    const outputFilename = `mx-results-${Date.now()}.xlsx`;
+    const outputFilename = `dns-results-${Date.now()}.xlsx`;
     const outputPath = path.join(__dirname, 'public', outputFilename);
     xlsx.writeFile(newWorkbook, outputPath);
 
@@ -175,7 +188,7 @@ app.post('/api/process-excel', upload.single('file'), async (req, res) => {
   }
 });
 
-// DNS Lookup endpoint
+// DNS Lookup endpoint (unchanged)
 app.get('/api/dns-lookup', async (req, res) => {
   const { domain } = req.query;
 
@@ -196,24 +209,6 @@ app.get('/api/dns-lookup', async (req, res) => {
     res.status(500).json({ error: 'Failed to perform DNS lookup' });
   }
 });
-
-// Helper function for MX records only
-async function lookupMXRecords(domain) {
-  return new Promise((resolve) => {
-    dns.resolve(domain, 'MX', (err, addresses) => {
-      if (err) {
-        if (err.code === 'ENODATA' || err.code === 'ENOTFOUND') {
-          resolve([]);
-        } else {
-          console.error(`Error looking up MX records:`, err);
-          resolve([]);
-        }
-      } else {
-        resolve(addresses);
-      }
-    });
-  });
-}
 
 // Start server
 app.listen(PORT, () => {
